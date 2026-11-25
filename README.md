@@ -20,9 +20,9 @@ El script borra la base `FichajesCS2DB` si ya existe y la crea de nuevo, así qu
 | 3. Vistas | `vw_RendimientoJugadores`, `vw_ResultadoEquipo` |
 | 4. Triggers | Cupo de 5 jugadores activos por equipo, un solo contrato activo por jugador y auditoría de transferencias |
 | 5. Función | `fn_CostoPorMapa` |
-| 6. Procedimientos | `sp_InsertarJugador`, `sp_RegistrarTransferencia`, `sp_ActualizarRankingEquipo`, `sp_BorrarPartida` |
-| 7. Datos | Datos de ejemplo: 10 organizaciones, 10 equipos, 23 jugadores, 25 contratos, 12 series, 23 mapas y 27 filas de estadísticas |
-| 8. Pruebas | 5 pruebas que muestran a los triggers, al procedimiento y a las restricciones rechazando datos inválidos |
+| 6. Procedimientos | 22 procedimientos: 2 de CRUD por cada tabla (alta, modificación, baja o consulta) y `sp_RegistrarTransferencia`, que registra un pase en una sola transacción |
+| 7. Datos | Datos de ejemplo: 3 juegos, 10 organizaciones, 10 equipos, 28 jugadores, 32 contratos, 10 transferencias, 7 mapas, 12 series, 23 partidas y 27 filas de estadísticas |
+| 8. Pruebas | 6 pruebas que muestran a los triggers, a los procedimientos y a las restricciones rechazando datos inválidos |
 | 9. Consultas | 10 consultas de análisis y un control de filas por tabla |
 
 Los datos son de ejemplo, inspirados en la escena real de CS2: resultados, estadísticas, salarios y montos son ilustrativos.

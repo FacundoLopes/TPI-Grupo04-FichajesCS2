@@ -1,9 +1,10 @@
-/* =====================================================================
+﻿/* =====================================================================
    TPI Ingenieria de Datos I (UADE) - Grupo 04 - Turno Noche
    Inteligencia de fichajes en Counter-Strike 2
    ---------------------------------------------------------------------
    Orden: 1. Tablas  2. Indices  3. Vistas  4. Triggers  5. Funcion
-          6. Procedimientos  7. Datos  8. Pruebas  9. Consultas
+          6. Procedimientos (2 CRUD por tabla + sp_RegistrarTransferencia)
+          7. Datos  8. Pruebas  9. Consultas
    Los datos son de ejemplo, inspirados en la escena real de CS2:
    resultados, estadisticas, salarios y montos son ilustrativos.
    Ejecutar entero en SSMS (F5).
@@ -347,8 +348,83 @@ END;
 GO
 
 -- ============================= 6. PROCEDIMIENTOS =================================
+-- 6.1 CRUD: dos procedimientos por tabla (alta, modificacion, baja o consulta).
+--     Los de modificacion verifican antes que la fila exista (error 50004).
+-- 6.2 Procedimiento de negocio: sp_RegistrarTransferencia.
 
--- SP 1: Insertar Jugador
+-- ---------- 6.1 CRUD ----------
+
+-- Juego: alta y consulta
+CREATE OR ALTER PROCEDURE sp_InsertarJuego
+    @nombre NVARCHAR(100),
+    @desarrollador NVARCHAR(100)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO Juego (nombre, desarrollador) VALUES (@nombre, @desarrollador);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE sp_ConsultarJuegos
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT idJuego, nombre, desarrollador FROM Juego ORDER BY nombre;
+END;
+GO
+
+-- Organizacion: alta y modificacion
+CREATE OR ALTER PROCEDURE sp_InsertarOrganizacion
+    @nombre NVARCHAR(100),
+    @region NVARCHAR(50)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO Organizacion (nombre, region) VALUES (@nombre, @region);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE sp_ActualizarOrganizacion
+    @idOrganizacion INT,
+    @nombre NVARCHAR(100),
+    @region NVARCHAR(50)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM Organizacion WHERE idOrganizacion = @idOrganizacion)
+        THROW 50004, 'No existe la organizacion indicada.', 1;
+    UPDATE Organizacion SET nombre = @nombre, region = @region
+    WHERE idOrganizacion = @idOrganizacion;
+END;
+GO
+
+-- Equipo: alta y modificacion del ranking
+CREATE OR ALTER PROCEDURE sp_InsertarEquipo
+    @idOrganizacion INT,
+    @idJuego INT,
+    @nombre NVARCHAR(100),
+    @rankingActual INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO Equipo (idOrganizacion, idJuego, nombre, rankingActual)
+    VALUES (@idOrganizacion, @idJuego, @nombre, @rankingActual);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE sp_ActualizarRankingEquipo
+    @idEquipo INT,
+    @nuevoRanking INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM Equipo WHERE idEquipo = @idEquipo)
+        THROW 50004, 'No existe el equipo indicado.', 1;
+    UPDATE Equipo SET rankingActual = @nuevoRanking WHERE idEquipo = @idEquipo;
+END;
+GO
+
+-- Jugador: alta y modificacion
 CREATE OR ALTER PROCEDURE sp_InsertarJugador
     @alias NVARCHAR(50),
     @nombreReal NVARCHAR(150),
@@ -361,7 +437,207 @@ BEGIN
 END;
 GO
 
--- SP 2: Registrar una transferencia en una sola transaccion:
+CREATE OR ALTER PROCEDURE sp_ActualizarJugador
+    @idJugador INT,
+    @alias NVARCHAR(50),
+    @nombreReal NVARCHAR(150),
+    @nacionalidad NVARCHAR(50)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM Jugador WHERE idJugador = @idJugador)
+        THROW 50004, 'No existe el jugador indicado.', 1;
+    UPDATE Jugador SET alias = @alias, nombreReal = @nombreReal, nacionalidad = @nacionalidad
+    WHERE idJugador = @idJugador;
+END;
+GO
+
+-- Contrato: alta y finalizacion (modificacion del estado y la fecha de fin)
+CREATE OR ALTER PROCEDURE sp_InsertarContrato
+    @idJugador INT,
+    @idEquipo INT,
+    @fechaInicio DATE,
+    @salarioMensual DECIMAL(10,2) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO Contrato (idJugador, idEquipo, fechaInicio, salarioMensual, estado)
+    VALUES (@idJugador, @idEquipo, @fechaInicio, @salarioMensual, 'Activo');
+END;
+GO
+
+CREATE OR ALTER PROCEDURE sp_FinalizarContrato
+    @idContrato INT,
+    @fechaFin DATE,
+    @estado VARCHAR(20) = 'Finalizado'   -- Finalizado o Rescindido
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM Contrato WHERE idContrato = @idContrato AND estado = 'Activo')
+        THROW 50004, 'No existe un contrato activo con ese id.', 1;
+    UPDATE Contrato SET estado = @estado, fechaFin = @fechaFin WHERE idContrato = @idContrato;
+END;
+GO
+
+-- Transferencia: el alta es sp_RegistrarTransferencia (6.2); aca, la consulta
+CREATE OR ALTER PROCEDURE sp_ConsultarTransferenciasJugador
+    @idJugador INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT t.idTransferencia, t.fecha, eo.nombre AS origen, ed.nombre AS destino, t.monto
+    FROM Transferencia t
+    LEFT JOIN Equipo eo ON t.idEquipoOrigen = eo.idEquipo
+    JOIN Equipo ed ON t.idEquipoDestino = ed.idEquipo
+    WHERE t.idJugador = @idJugador
+    ORDER BY t.fecha;
+END;
+GO
+
+-- Mapa: alta y modificacion (entra o sale del pool competitivo)
+CREATE OR ALTER PROCEDURE sp_InsertarMapa
+    @nombre VARCHAR(50)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO Mapa (nombre) VALUES (@nombre);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE sp_ActualizarEstadoMapa
+    @idMapa INT,
+    @activoCompetitivo BIT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM Mapa WHERE idMapa = @idMapa)
+        THROW 50004, 'No existe el mapa indicado.', 1;
+    UPDATE Mapa SET activoCompetitivo = @activoCompetitivo WHERE idMapa = @idMapa;
+END;
+GO
+
+-- Serie: alta y consulta de las series de un equipo
+CREATE OR ALTER PROCEDURE sp_InsertarSerie
+    @fecha DATE,
+    @idEquipoA INT,
+    @idEquipoB INT,
+    @rankingRivalA INT = NULL,
+    @rankingRivalB INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO Serie (fecha, idEquipoA, idEquipoB, rankingRivalA, rankingRivalB)
+    VALUES (@fecha, @idEquipoA, @idEquipoB, @rankingRivalA, @rankingRivalB);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE sp_ConsultarSeriesEquipo
+    @idEquipo INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT s.idSerie, s.fecha, ea.nombre AS equipoA, eb.nombre AS equipoB
+    FROM Serie s
+    JOIN Equipo ea ON s.idEquipoA = ea.idEquipo
+    JOIN Equipo eb ON s.idEquipoB = eb.idEquipo
+    WHERE @idEquipo IN (s.idEquipoA, s.idEquipoB)
+    ORDER BY s.fecha;
+END;
+GO
+
+-- Partida: alta y baja (la baja borra tambien sus estadisticas, en una transaccion)
+CREATE OR ALTER PROCEDURE sp_InsertarPartida
+    @idSerie INT,
+    @idMapa INT,
+    @rondasEquipoA INT,
+    @rondasEquipoB INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO Partida (idSerie, idMapa, rondasEquipoA, rondasEquipoB)
+    VALUES (@idSerie, @idMapa, @rondasEquipoA, @rondasEquipoB);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE sp_BorrarPartida
+    @idPartida INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+            DELETE FROM EstadisticaCS2 WHERE idPartida = @idPartida;
+            DELETE FROM Partida WHERE idPartida = @idPartida;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
+-- EstadisticaCS2: alta y consulta de las estadisticas de un jugador
+CREATE OR ALTER PROCEDURE sp_InsertarEstadistica
+    @idPartida INT,
+    @idJugador INT,
+    @idEquipo INT,
+    @kills INT,
+    @deaths INT,
+    @assists INT,
+    @adr DECIMAL(5,1),
+    @kast DECIMAL(5,1),
+    @rating2 DECIMAL(4,2)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO EstadisticaCS2 (idPartida, idJugador, idEquipo, kills, deaths, assists, adr, kast, rating2)
+    VALUES (@idPartida, @idJugador, @idEquipo, @kills, @deaths, @assists, @adr, @kast, @rating2);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE sp_ConsultarEstadisticasJugador
+    @idJugador INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT s.fecha, m.nombre AS mapa, e.nombre AS equipo,
+           est.kills, est.deaths, est.assists, est.adr, est.kast, est.rating2
+    FROM EstadisticaCS2 est
+    JOIN Partida p ON est.idPartida = p.idPartida
+    JOIN Serie s ON p.idSerie = s.idSerie
+    JOIN Mapa m ON p.idMapa = m.idMapa
+    JOIN Equipo e ON est.idEquipo = e.idEquipo
+    WHERE est.idJugador = @idJugador
+    ORDER BY s.fecha;
+END;
+GO
+
+-- Auditoria: consulta y depuracion de registros viejos
+CREATE OR ALTER PROCEDURE sp_ConsultarAuditoria
+    @operacion VARCHAR(10) = NULL   -- INSERT, BLOQUEADO o NULL para todas
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT idAuditoria, tablaAfectada, operacion, usuarioDB, fechaHora, detalle
+    FROM Auditoria
+    WHERE @operacion IS NULL OR operacion = @operacion
+    ORDER BY idAuditoria;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE sp_BorrarAuditoriaAnterior
+    @fechaLimite DATETIME
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM Auditoria WHERE fechaHora < @fechaLimite;
+END;
+GO
+
+-- ---------- 6.2 Procedimiento de negocio ----------
+
+-- Registrar una transferencia en una sola transaccion (es el alta de Transferencia):
 -- cierra el contrato activo (el dia anterior), registra el pase y abre el contrato nuevo.
 CREATE OR ALTER PROCEDURE sp_RegistrarTransferencia
     @idJugador INT,
@@ -403,41 +679,14 @@ BEGIN
 END;
 GO
 
--- SP 3: Actualizar Ranking de Equipo
-CREATE OR ALTER PROCEDURE sp_ActualizarRankingEquipo
-    @idEquipo INT,
-    @nuevoRanking INT
-AS
-BEGIN
-    SET NOCOUNT ON;
-    UPDATE Equipo
-    SET rankingActual = @nuevoRanking
-    WHERE idEquipo = @idEquipo;
-END;
-GO
-
--- SP 4: Borrar una partida con sus estadisticas
-CREATE OR ALTER PROCEDURE sp_BorrarPartida
-    @idPartida INT
-AS
-BEGIN
-    SET NOCOUNT ON;
-    BEGIN TRY
-        BEGIN TRANSACTION;
-            DELETE FROM EstadisticaCS2 WHERE idPartida = @idPartida;
-            DELETE FROM Partida WHERE idPartida = @idPartida;
-        COMMIT TRANSACTION;
-    END TRY
-    BEGIN CATCH
-        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-        THROW;
-    END CATCH
-END;
-GO
-
 -- ============================= 7. DATOS DE EJEMPLO =================================
 
-INSERT INTO Juego (nombre, desarrollador) VALUES (N'Counter-Strike 2', N'Valve');
+-- Juego es una tabla de poca insercion (como una categoria): alcanzan 3 filas.
+-- Solo Counter-Strike 2 tiene equipos cargados; los otros muestran que el modelo admite mas juegos.
+INSERT INTO Juego (nombre, desarrollador) VALUES
+(N'Counter-Strike 2', N'Valve'),          -- 1
+(N'Valorant', N'Riot Games'),             -- 2
+(N'League of Legends', N'Riot Games');    -- 3
 
 INSERT INTO Organizacion (nombre, region) VALUES
 (N'Team Spirit', N'CIS'),               -- 1
@@ -483,7 +732,12 @@ INSERT INTO Jugador (alias, nombreReal, nacionalidad) VALUES
 (N'Brollan', N'Ludvig Brolin', N'Suecia'),            -- 17
 (N'NAF', N'Keith Markovic', N'Canadá'),               -- 18
 (N'HooXi', N'Rasmus Nielsen', N'Dinamarca'),          -- 19
-(N'ropz', N'Robin Kool', N'Estonia');                 -- 20
+(N'ropz', N'Robin Kool', N'Estonia'),                 -- 20
+(N'device', N'Nicolai Reedtz', N'Dinamarca'),         -- 21 (sin contrato: llegan por transferencia)
+(N'Staehr', N'Victor Staehr', N'Dinamarca'),          -- 22
+(N'jabbi', N'Jakob Nygaard', N'Dinamarca'),           -- 23
+(N'TeSeS', N'René Madsen', N'Dinamarca'),             -- 24
+(N'sjuush', N'Rasmus Beck', N'Dinamarca');            -- 25
 
 -- Contratos iniciales (antes de las transferencias que se registran con el SP)
 INSERT INTO Contrato (idJugador, idEquipo, fechaInicio, fechaFin, salarioMensual, estado) VALUES
@@ -508,13 +762,22 @@ INSERT INTO Contrato (idJugador, idEquipo, fechaInicio, fechaFin, salarioMensual
 (18, 3, '2017-01-01', NULL, 20000, 'Activo'),         -- NAF      - Liquid
 (12, 2, '2017-02-01', '2020-10-01', NULL, 'Finalizado'); -- NiKo  - FaZe (contrato anterior)
 
+-- Mapa tambien es de poca insercion: el pool competitivo de CS2 tiene 7 mapas.
 INSERT INTO Mapa (nombre) VALUES ('Mirage'), ('Nuke'), ('Inferno'), ('Ancient'), ('Anubis'), ('Dust2'), ('Train');
 
--- Transferencias con el SP. Twistzz sale de FaZe antes de que llegue frozen,
+-- 10 transferencias con el SP. Twistzz sale de FaZe antes de que llegue frozen,
 -- asi FaZe nunca supera los 5 jugadores activos. Montos ilustrativos; NULL = no divulgado.
+-- Team Falcons queda sin jugadores a proposito (lo muestra la consulta 10).
 EXEC sp_RegistrarTransferencia @idJugador = 1, @idEquipoDestino = 1, @monto = NULL,   @fecha = '2023-07-01'; -- donk a Spirit (academia)
 EXEC sp_RegistrarTransferencia @idJugador = 5, @idEquipoDestino = 3, @monto = 500000, @fecha = '2023-12-07'; -- Twistzz de FaZe a Liquid
 EXEC sp_RegistrarTransferencia @idJugador = 4, @idEquipoDestino = 2, @monto = 250000, @fecha = '2023-12-04'; -- frozen de MOUZ a FaZe
+EXEC sp_RegistrarTransferencia @idJugador = 21, @idEquipoDestino = 9,  @monto = NULL,   @fecha = '2024-04-01'; -- device a Astralis (libre)
+EXEC sp_RegistrarTransferencia @idJugador = 22, @idEquipoDestino = 9,  @monto = 80000,  @fecha = '2024-04-01'; -- Staehr a Astralis (libre)
+EXEC sp_RegistrarTransferencia @idJugador = 23, @idEquipoDestino = 9,  @monto = 120000, @fecha = '2024-04-15'; -- jabbi a Astralis (libre)
+EXEC sp_RegistrarTransferencia @idJugador = 24, @idEquipoDestino = 10, @monto = NULL,   @fecha = '2024-05-01'; -- TeSeS a HEROIC (libre)
+EXEC sp_RegistrarTransferencia @idJugador = 25, @idEquipoDestino = 10, @monto = 60000,  @fecha = '2024-05-01'; -- sjuush a HEROIC (libre)
+EXEC sp_RegistrarTransferencia @idJugador = 17, @idEquipoDestino = 10, @monto = 150000, @fecha = '2024-06-01'; -- Brollan de MOUZ a HEROIC
+EXEC sp_RegistrarTransferencia @idJugador = 20, @idEquipoDestino = 5,  @monto = NULL,   @fecha = '2025-01-10'; -- ropz de FaZe a Vitality
 
 -- Series: 3 de FaZe antes del fichaje de frozen (04/12/2023), 3 despues y 6 de otros equipos
 INSERT INTO Serie (fecha, idEquipoA, idEquipoB, rankingRivalA, rankingRivalB) VALUES
@@ -634,6 +897,15 @@ BEGIN TRY
 END TRY
 BEGIN CATCH
     PRINT 'Prueba 5 rechazada: ' + ERROR_MESSAGE();
+END CATCH;
+GO
+
+-- Prueba 6 (CRUD): modificar un jugador que no existe
+BEGIN TRY
+    EXEC sp_ActualizarJugador @idJugador = 999, @alias = N'fantasma', @nombreReal = NULL, @nacionalidad = N'Argentina';
+END TRY
+BEGIN CATCH
+    PRINT 'Prueba 6 rechazada: ' + ERROR_MESSAGE();
 END CATCH;
 GO
 
